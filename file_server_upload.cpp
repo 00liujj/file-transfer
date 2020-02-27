@@ -31,13 +31,13 @@ file_server(int port)
  
     //创建结构  绑定地址端口号
     struct sockaddr_in sockAddr;
-    memset(&sockAddr, 0, sizeof(struct sockaddr_in));
+    memset(&sockAddr, 0, sizeof(sockAddr));
     sockAddr.sin_family = AF_INET;
-    sockAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    sockAddr.sin_addr.s_addr = inet_addr("0.0.0.0");
     sockAddr.sin_port = htons(port);
  
     //bind
-    if(bind(skfd, (struct sockaddr *)(&sockAddr), sizeof(struct sockaddr)) < 0) {
+    if(bind(skfd, (struct sockaddr *)(&sockAddr), sizeof(sockAddr)) < 0) {
         perror("Bind");
         exit(1);
     } else {
