@@ -8,23 +8,17 @@
 #include <netinet/in.h>
 #include <sys/types.h>
 #include <arpa/inet.h>
+#include <thread>
  
 #define BUF_SIZE  (8192)
  
-unsigned char fileBuf[BUF_SIZE];
  
 /*
  * send file
  */
 void
-file_server(int port, const char *path)
+file_server(int port)
 {
- 
-    if( !path ) {
-        printf("file server: file path error!\n");
-        return;
-    }
-
     int skfd, cnfd;
  
     //创建tcp socket
@@ -36,7 +30,7 @@ file_server(int port, const char *path)
     }
  
     //创建结构  绑定地址端口号
-    struct sockaddr_in sockAddr, cltAddr;
+    struct sockaddr_in sockAddr;
     memset(&sockAddr, 0, sizeof(struct sockaddr_in));
     sockAddr.sin_family = AF_INET;
     sockAddr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -57,72 +51,104 @@ file_server(int port, const char *path)
     } else {
         printf("listen success!\n");
     }
- 
-    /* 调用accept,服务器端一直阻塞，直到客户程序与其建立连接成功为止*/
-    socklen_t addrLen = sizeof(struct sockaddr_in);
-    if((cnfd = accept(skfd, (struct sockaddr *)(&cltAddr), &addrLen)) < 0) {
-        perror("Accept");
-        exit(1);
-    } else {
-        printf("accept success!\n");
-    }
- 
 
-    int fileSize = 0;
-    int nread = read(cnfd, (unsigned char *)&fileSize, 4);
-    if( nread != 4 ) {
+
+    while (1) {
+        /* 调用accept,服务器端一直阻塞，直到客户程序与其建立连接成功为止*/
+        struct sockaddr_in clientAddr;
+        socklen_t addrLen = sizeof(struct sockaddr_in);
+        if((cnfd = accept(skfd, (struct sockaddr *)(&clientAddr), &addrLen)) < 0) {
+            perror("Accept");
+            continue;
+        }
+        
+        printf("accept success!\n");
+        void dst_func(int cnfd);
+        std::thread t(dst_func, cnfd);
+        t.detach();
+    }
+    close(skfd);
+}
+
+struct file_meta {
+    int size;
+    char src[256];
+    char dst[256];
+};
+
+
+void dst_func(int cnfd) {
+
+    /// read file meta
+    file_meta meta;
+    int nread = read(cnfd, (unsigned char *)&meta, sizeof(meta));
+    if( nread != sizeof(meta) ) {
         printf("file size error!\n");
         close(cnfd);
-        exit(-1);
+        return;
     }
-    printf("file size:%d\n", fileSize);
- 
-    int nwrite = write(cnfd, "OK", 2);
-    if( nwrite != 2 ) {
+    printf("size %d, src %s, dst %s\n", meta.size, meta.src, meta.dst);
+    
+    /// write meta ack
+    char metaAck[100] = {"meta ok"};
+    int nwrite = write(cnfd, metaAck, sizeof(metaAck));
+    if( nwrite != sizeof(metaAck) ) {
         perror("write");
         close(cnfd);
         exit(1);
     }
  
-    FILE* fp = fopen(path, "w");
+    FILE* fp = fopen(meta.dst, "w");
     if( fp == NULL ) {
         perror("fopen");
         close(cnfd);
-        close(skfd);
         return;
     }
  
-    while(1) {
+    /// read file content
+    unsigned char fileBuf[BUF_SIZE];
+    int count = 0;
+    while(count < meta.size) {
         int nread = read(cnfd, fileBuf, sizeof(fileBuf));
-        printf("server received %d bytes\n", nread);
         if (nread <= 0) {
+            perror("read");
             break;
         }
+        count += nread;
+        printf("server received %d bytes\n", count);
         int nwrite = fwrite(fileBuf, 1, nread, fp);
         if (nwrite != nread) {
             perror("fwrite");
-            close(cnfd);
-            close(skfd);
-            return;
+            break;
         }
     }
-    fclose(fp);
+    printf("read finish\n");
 
+    /// write content ack
+    char contentAck[100] = {"content ok"};
+    nwrite = write(cnfd, contentAck, sizeof(contentAck));
+    if( nwrite != sizeof(contentAck) ) {
+        perror("write");
+        close(cnfd);
+        exit(1);
+    }
+
+    fclose(fp);
     close(cnfd);
-    close(skfd);
 }
+
  
 int
 main(int argc, char **argv)
 {
-    if( argc < 3 ) {
+    if( argc < 2 ) {
         printf("file server: argument error!\n");
-        printf("file_server port /tmp/temp\n");
+        printf("file_server port\n");
         return -1;
     }
- 
+
     int port = atoi(argv[1]);
-    file_server(port, argv[2]);
+    file_server(port);
  
     return 0;
 }
